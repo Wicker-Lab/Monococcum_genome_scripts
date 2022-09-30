@@ -1,0 +1,116 @@
+#!/usr/bin/perl
+
+# ****** CR-1_blast_extract
+# pulls out files which gave strong blast hist
+# from a large number of blast results
+
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+`cp /home/wicker/data/WICKERsoft/BLOSUM62 .`;
+
+if (@ARGV < 2) {
+	print "1. arg = sequence 1\n";
+        print "2. arg = sequence 2\n";
+#	print "3. arg = mimimal hit size\n";
+	print "3. arg = scale unit in kb (optional)\n";
+	exit;
+	}
+
+# make database and blast other sequence against it ++++++++++++++++++++++++++++++++
+$file1 = $ARGV[0];
+$file2 = $ARGV[1];
+$min_sim = 80;
+#$min_len = $ARGV[2];
+$scale = 50;
+if ($ARGV[2] ne '') {
+	$scale = $ARGV[2];
+	}
+
+($dna1) = &pure_sequence($file1);
+$size1 = length($dna1);
+($dna2) = &pure_sequence($file2);
+$size2 = length($dna2);
+
+`mk_db_DNA $file2`;
+
+print "produced database $file2\n";
+
+$db = "/home/wicker/data/databases/blast_databases/$file2";
+$out = "$file1\.blastn";
+$sort = "blastn";
+
+print "run blast\n";
+
+`blastall -p $sort -d $db -i $file1 -F T -b 10000 -v 50 -o $out`;
+
+$out2 = "$file1\__x__$file2\.blast_plot";
+open(OUT,">$out2");
+
+print OUT "INFILE_1 $file1 $size1 bp\n";
+print OUT "INFILE_2 $file2 $size2 bp\n";
+
+# parse blast +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++1
+
+@test = ();
+@data = ();
+$hit_yes =0;
+$ID='';
+
+(@test) = &parse_blast($out);
+
+# loop over all hits ++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+foreach $test (@test) { 
+
+($ID,$rem,$s_size) = ($test =~ /ID=([^;]+);([^;]+);(\d+)/);
+(@data) = ($test =~ /^(data=.+)$/gm);
+
+# loop over all alignments ++++++++++++++++++++++++++++++++++++ 
+foreach $data (@data) {
+
+($Eval,$sim,$be1,$en1,$be2,$en2,$seq1,$seq2) = ($data =~
+/data=[^;]+;([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+)/);
+
+($pot) = ($Eval =~ /e-(\d+)/);
+if ($Eval eq '0.0') {
+	$pot = 100;
+	}
+
+$diff = abs($be1-$en1);
+
+# if criteria are met, make output
+if (($diff >= $min_len)&&($sim >=$min_sim)&&($pot > 6)) {
+
+	($aln,$sim2) = &compare_2_seqs($seq1,$seq2);
+
+	$entry = "$be1-$en1\t$be2-$en2\t$sim2%";
+	push(@collect,$entry);
+	
+	}
+
+} # end loop over all alignments-----------------------------------
+	
+} # end loop over all hits -------------------------------------------
+
+
+`rm BLOSUM62`;
+
+@sort = sort{$a<=>$b} (@collect);
+
+foreach $entry (@sort) {
+	print OUT "$entry\n";
+	}
+
+
+print "\nwrote $out2\n\n";
+print "view output with   visual_blast_dotplot\n\n";
+print "or with            png_blast_compare\n\n";
+print "or with            png_blast_compare_annotation\n\n";
+
+`rm_db $file2`;
+
+`png_blast_compare $out2 80 $scale`;
+
+

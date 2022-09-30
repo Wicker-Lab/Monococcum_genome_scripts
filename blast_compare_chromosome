@@ -1,0 +1,182 @@
+#!/usr/bin/perl
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+`cp /home/wicker/data/WICKERsoft/BLOSUM62 .`;
+
+if (@ARGV < 5) {
+	print "1.arg = chromosome segment 1\n";
+	print "2.arg = chromosome segment 2\n";
+	print "3.arg = size of segment for blasts\n";
+	print "4.arg = sliding step\n";
+	print "5.arg = range of comparison in mb (e.g. 0-100)\n";
+	exit;
+	}
+
+
+$chr1 = $ARGV[0];
+$chr2 = $ARGV[1];
+$slice = $ARGV[2];
+$step = $ARGV[3];
+$step_orig = $ARGV[3];
+$blast = "blastn";
+
+$min_len = int($slice/3);
+$min_sim = 80;
+
+
+#$break_be = 152000000;
+#$break_en = 162000000;
+$break_be = 424000000;
+$break_en = 432000000;
+
+($min,$max) = ($ARGV[4] =~ /^(\d+)-(\d+)/);
+$min *= 1000000;
+$max *= 1000000;
+
+
+# check if database exists
+&check_db;
+
+$log2 = "log_chr_comp_$chr1\__x__$chr2\.tab";
+open(LOG2,">$log2");
+
+
+print "get chromosome sizes\n";
+($dna1) = &pure_sequence($chr1);
+($dna2) = &pure_sequence($chr2);
+$len1 = length($dna1);
+$len2 = length($dna2);
+$dna2 = '';
+
+if ($max > $len1) {
+	$max = $len1;
+	}
+
+print "$chr1\t$len1 bp\n";
+print "$chr2\t$len2 bp\n";
+print LOG2 "CHR1=$chr1 LEN1=$len1\tCHR2=$chr2\tLEN2=$len2\n";
+
+print "align $min-$max\n";
+
+
+# walk through seq1 in segments
+
+for($i=$min;$i<($max-$step);$i+=$step) {
+
+	if ($i < $break_be) {
+#		$step = 4000000;
+		}
+	if ($i > $break_en) {
+                #$step = 4000000;
+                }
+
+	if (($i >= $break_be) && ($i <= $break_en)) {
+#		$step = 100000; 
+		}
+	if ($i > $break_en) {
+#		$step = $step_orig;
+		}
+
+	$seq = substr($dna1,$i,$slice);
+	$count++;
+	$name = "$chr1\_X_$chr2\_$count";
+	print "$name\tpos $i ----------------\n";
+	&flow_sort;
+
+	if ($count > 7) {
+#		exit;
+		}
+	}
+
+
+#`rm_db $chr2`;
+
+
+
+# +++++++++++++++++++++++++++++++++++++++
+sub flow_sort {
+
+$time_out++;
+
+($fasta) = &mk_fasta($seq);
+
+open(OUT,">$name");
+print OUT ">$name\n$fasta\n";
+close (OUT);
+
+$out = "$name\.blastn";
+$db = "/home/wicker/data/databases/blast_databases/$chr2";
+
+
+
+`blastall -p $blast -d $db -i $name -F T -o $out`;
+
+(@test) = &parse_blast($out);
+
+# just look at the best hit
+($ID,$rem,$s_size) = ($test[0] =~ /ID=([^;]+);([^;]+);(\d+)/);
+(@data) = ($test[0] =~ /^(data=.+)$/gm);
+
+($Eval,$sim,$be1,$en1,$be2,$en2,$seq1,$seq2) = ($data[0] =~
+/data=[^;]+;([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+)/);
+
+$diff = abs($be1-$en1)+1;
+
+$pot = '';
+($pot) = ($Eval =~ /e-(\d+)/);
+
+if ($Eval eq '0.0') {
+        $pot = 100;
+        }
+
+if (($diff > $min_len) && ($sim >= $min_sim)) {
+	# count aligned bases and cacl exact similarity
+	($align,$rel) = &compare_2_seqs($seq1,$seq2);
+	$len_align = length($align);
+	(@match) = ($align =~ /([\|])/g);
+	$match = @match;
+	$sim = (int($match/$len_align*10000))/100;
+
+	
+	$count_hit++;
+	$ori = "for";
+	if (($be1 > $en1) || ($be2 > $en2)){
+		$ori = "rev";
+		}
+	$beg1 = $be1+$i;
+	print "$count\t$count_hit\t$name\t$beg1\t$be2\t$diff\t$sim%\t$ori\n";
+	print LOG2 "$name\t$beg1\t$be2\t$diff\t$sim%\t$ori\n";
+	#print LOG "$name,$be1,$be2,$len_align,$match,$rel,$ori\n"
+	} 
+
+`rm $out`;
+`rm $name`;
+
+} # -----------------------------------------------
+
+
+#check if database exists
+sub check_db {
+`ls /home/wicker/data/databases/blast_databases > templist`;
+
+open (IN, "<templist");
+$exist = 0;
+while (<IN>){ 
+        ($ba) = /^($ch)\./;
+        if ($ba) {
+                $exist = 1;
+                }
+        }
+close (IN);
+
+if ($exists ==1) {
+        print "database exists\n";
+        }
+if ($exists ==0) {
+        print "make database $ch\n";
+        `mk_db_DNA $ch`;
+        }
+
+}
